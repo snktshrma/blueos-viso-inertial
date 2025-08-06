@@ -1,0 +1,7 @@
+[submodule "ros2_ws/src/viso_inertial_calib"]
+	path = ros2_ws/src/viso_inertial_calib
+	url = https://github.com/snktshrma/viso_inertial_calib.git
+[submodule "ros2_ws/src/VINS-Fusion-ROS2"]
+	path = ros2_ws/src/VINS-Fusion-ROS2
+	url = https://github.com/snktshrma272/VINS-Fusion-ROS2.git
+	branch = dev/vio

@@ -1,82 +1,99 @@
-FROM python:3.11-slim
+ARG ROS_DISTRO=humble
+FROM ros:${ROS_DISTRO}-ros-base
 
-# Install system dependencies for OpenCV
-RUN apt-get update && \
-    apt-get install -y \
-        iputils-ping \
-        zlib1g-dev \
-        build-essential \
-        cmake \
-        git \
-        pkg-config \
-        libgl1-mesa-glx \
-        libglib2.0-0 \
-        libsm6 \
-        libxext6 \
-        libxrender-dev \
-        libgomp1 && \
-    rm -rf /var/lib/apt/lists/*
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_BREAK_SYSTEM_PACKAGES=1
 
-COPY app /app
-RUN python -m pip install /app --extra-index-url https://www.piwheels.org/simple && \
-    python -m pip install fastapi uvicorn requests apriltag && \
-    python -m pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless && \
-    python -m pip install opencv-python==4.10.0.84 --extra-index-url https://www.piwheels.org/simple
+WORKDIR /root/
 
-EXPOSE 8000/tcp
+RUN rm -f /var/lib/dpkg/info/libc-bin.* \
+ && apt-get clean \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+    libc-bin \
+    tmux nano nginx wget git \
+    python3-dev python3-pip python3-venv \
+    ros-${ROS_DISTRO}-mavros \
+    ros-${ROS_DISTRO}-mavros-extras \
+    ros-${ROS_DISTRO}-mavros-msgs \
+    ros-${ROS_DISTRO}-geographic-msgs \
+    ros-${ROS_DISTRO}-foxglove-bridge \
+    ros-${ROS_DISTRO}-gscam \
+ && apt-get autoremove -y \
+ && apt-get clean -y \
+ && rm -rf /var/lib/apt/lists/*
 
-# application version.  This should match the register_service file's version
-LABEL version="0.0.1"
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+    libgstreamer1.0-0 \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav \
+    gstreamer1.0-tools \
+    gstreamer1.0-x \
+    gstreamer1.0-alsa \
+    gstreamer1.0-gl \
+    gstreamer1.0-gtk3 \
+    gstreamer1.0-qt5 \
+    gstreamer1.0-pulseaudio \
+    libgstreamer-plugins-base1.0-dev \
+ && apt-get autoremove -y \
+ && apt-get clean -y \
+ && rm -rf /var/lib/apt/lists/*
 
-# Permissions for the container
-# "Binds" section maps the host PC directories to the application directories
-# "CpuQuota" and "CpuPeriod" limit to a single CPU core
-LABEL permissions='\
-{\
-  "ExposedPorts": {\
-    "8000/tcp": {}\
-  },\
-  "HostConfig": {\
+COPY ros2_ws /root/ros2_ws
+WORKDIR /root/ros2_ws
+
+RUN git submodule update --init --recursive
+
+RUN apt-get update \
+ && rosdep install --from-paths src --ignore-src -r -y \
+ && . /opt/ros/${ROS_DISTRO}/setup.sh \
+ && colcon build --symlink-install \
+ && ros2 run mavros install_geographiclib_datasets.sh \
+ && apt-get autoremove -y \
+ && apt-get clean -y \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN echo "source /opt/ros/${ROS_DISTRO}/setup.sh" >> ~/.bashrc \
+ && echo "source /root/ros2_ws/install/setup.sh" >> ~/.bashrc
+
+COPY files/install-ttyd.sh /install-ttyd.sh
+RUN bash /install-ttyd.sh \
+ && rm /install-ttyd.sh
+
+COPY files/nginx.conf /etc/nginx/nginx.conf
+COPY files/index.html /usr/share/ttyd/index.html
+
+COPY files/start.sh /start.sh
+COPY files/register_service /site/register_service
+RUN chmod +x /start.sh /site/register_service
+
+LABEL version="0.1.0"
+LABEL authors='[{"name":"Sanket Sharma","email":"sharma.sanket272@gmail.com"}]'
+LABEL company='{"about":"Sanket","name":"Sanket","email":"sharma.sanket272@gmail.com"}'
+LABEL readme="https://github.com/snktshrma/blueos-viso-inertial/blob/main/README.md"
+LABEL type="device-integration"
+LABEL tags='["data-collection"]'
+LABEL links='{"source":"https://github.com/snktshrma/blueos-viso-inertial"}'
+LABEL requirements="core >= 1.1"
+LABEL permissions='{\
+  "NetworkMode":"host",\
+  "HostConfig":{\
     "Binds":[\
-      "/usr/blueos/extensions/viso-inertial/settings:/app/settings",\
-      "/usr/blueos/extensions/viso-inertial/logs:/app/logs"\
+      "/dev:/dev:rw",\
+      "/usr/blueos/extensions/ros2/:/root/persistent_ws/:rw"\
     ],\
-    "CpuQuota": 100000,\
-    "CpuPeriod": 100000,\
-    "ExtraHosts": [\
-      "host.docker.internal:host-gateway"\
-    ],\
-    "PortBindings": {\
-      "8000/tcp": [\
-        {\
-          "HostPort": ""\
-        }\
-      ]\
-    }\
+    "Privileged":true,\
+    "CpuQuota":200000,\
+    "CpuPeriod":100000,\
+    "Memory":1097152000\
   }\
 }'
 
-LABEL authors='[\
-    {\
-        "name": "Sanket Sharma",\
-        "email": "sharma.sanket272@gmail.com"\
-    }\
-]'
+RUN echo "set +e" >> ~/.bashrc
 
-LABEL company='{\
-    "about": "ArduPilot",\
-    "name": "ArduPilot",\
-    "email": "rmackay9@yahoo.com"\
-}'
+ENTRYPOINT ["/start.sh"]
 
-LABEL readme='https://github.com/snktshrma/blueos-viso-inertial/blob/main/README.md'
-LABEL type="device-integration"
-LABEL tags='[\
-  "data-collection"\
-]'
-LABEL links='{\
-        "source": "https://github.com/snktshrma/blueos-viso-inertial"\
-    }'
-LABEL requirements="core >= 1.1"
-
-ENTRYPOINT ["uvicorn", "app.main:app", "--host", "0.0.0.0"]
